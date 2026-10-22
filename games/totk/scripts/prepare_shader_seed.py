@@ -29,7 +29,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from shader_list import ShaderList   # noqa: E402
 
-CHAIN = 'totk-native-v6-unverified'
+CHAIN = 'totk-native-v7-unverified'
 MIN_SHADERS = 8000
 ZSTD = b'\x28\xb5\x2f\xfd'
 YAZ0 = b'Yaz0'
@@ -266,6 +266,14 @@ def control_key_len(control):
     shader's), never more than 0x880."""
     size = struct.unpack_from('<I', control, 0x20)[0] if len(control) >= 0x24 else 0
     return size if 0x7cc <= size < 0x880 else 0x880
+
+
+def early_fragment_tests(stage, control):
+    """Whether a fragment shader asks for early fragment tests: control byte +0x718 of the 0x880-byte sections, which the
+    NVN driver reads as a fragment flag (the Switch then tests depth before the shader runs; the translator declares
+    [[early_fragment_tests]]). Breath of the Wild's shorter sections (control_key_len below 0x880) are not read. Same
+    rule as totk_shader_rt.m variant_request."""
+    return stage == 'ps' and control_key_len(control) == 0x880 and len(control) > 0x718 and bool(control[0x718] & 1)
 
 
 def bound_control(control, game='totk', embedded=True):
@@ -658,6 +666,8 @@ def prepare(romfs, output, translator, spirv_cross, version, shader_list=None, m
                                        c1=code[c1:length].hex(), depth_minus_w=True, **answers)
                         if stage == 'cs':
                             request['local'] = list(struct.unpack_from('<III', control, 0x748))
+                        if early_fragment_tests(stage, control):
+                            request['early_fragment_tests'] = True
                         process.stdin.write(json.dumps(request)+'\n'); process.stdin.flush()
                         response = process.stdout.readline()
                         if not response:
